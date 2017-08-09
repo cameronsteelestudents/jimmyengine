@@ -1,3 +1,8 @@
+// todo
+	// camera follow
+	// generate loot on enemy defeat
+	//
+
 var gameScreen = document.getElementById('gameScreen');
 var windowWidth = document.body.offsetWidth;
 var windowHeight = document.body.offsetHeight;
@@ -21,9 +26,28 @@ function Vector2D(x, y) {
     me.add = function(anotherVector) {
     	return new Vector2D(me.x + anotherVector.x, me.y + anotherVector.y);
     }
+
+    me.subtract = function(anotherVector) {
+    	return new Vector2D(me.x - anotherVector.x, me.y - anotherVector.y);
+    }
+
+    me.getMagnitude = function() {
+    	return Math.sqrt(me.x * me.x + me.y * me.y);
+    }
+
+    me.normalize = function() {
+    	var magnitude = me.getMagnitude();
+    	return new Vector2D(me.x / magnitude, me.y / magnitude);
+    }
+
+    me.scale = function(amount) {
+    	return new Vector2D(me.x * amount, me.y * amount);
+    }
 }
 
 function GameObject(x, y, w, h, color) {
+	var me = this;
+
 	this.position = new Vector2D(x, y);
 	this.w = w;
 	this.h = h;
@@ -33,6 +57,11 @@ function GameObject(x, y, w, h, color) {
 	this.grounded = false;
 	this.relative = null;
 	this.tags = [];
+
+	me.remove = function() {
+		gameObjects.splice(gameObjects.indexOf(me), 1);
+	}
+
 	gameObjects.push(this);
 }
 
@@ -42,6 +71,7 @@ function Character(x, y, w, h) {
 	var me = this;
 
 	me.healthBar = new GameObject(0, 20, w, 10);
+	me.healthBar.color = 'rgb(200, 0, 0)';
 	me.healthBar.relative = this;
 	me.healthBar.static = true;
 	me.health = 100;
@@ -50,6 +80,35 @@ function Character(x, y, w, h) {
 	me.changeHealth = function(amount) {
 		me.health += amount;
 		me.healthBar.w = me.health / me.maxHealth * me.w;
+
+		if (me.health <= 0) {
+			me.remove();
+		}
+	}
+}
+
+function Enemy(x, y, type) {
+	Character.call(this, x, y, 50, 50);
+
+	var me = this;
+
+	var mySpeed = 2;
+
+	me.tags.push('enemy');
+
+	me.think = function() {
+		// look for player?
+		// direction between the enemy and the player
+		// me.position
+		// player.position
+		var differenceVector = player.position.subtract(me.position);
+		// me.velocity 
+
+		if(differenceVector.x > 0) {
+			me.velocity.x = mySpeed;
+		} else if(differenceVector.x < 0) {
+			me.velocity.x = -mySpeed;
+		}
 	}
 }
 
@@ -72,12 +131,27 @@ function checkCollision(gameObjectA, gameObjectB) {
 }
 
 var player = new Character(10, -20, 20, 20, 'rgba(200, 0, 0, 0.5)');
+var enemy = new Enemy(300, -20, 'melee');
+
 var rock = new GameObject(50, -30, 50, 50, 'rgba(0, 200, 0, 0.9');
 var spike = new GameObject(400, 20 ,10, 12, 'rgba(200, 0, 0, 0.5');
 spike.tags.push('spike');
 var swampguy = new GameObject(100, -50, 25, 25, 'rgba(0, 0, 200, 0.3');
 var ground = new GameObject(0, -500, 1000, 10, 'rgb(0, 0, 0)');
 ground.static = true;
+
+window.addEventListener('mousedown', function(event){
+	var bullet = new GameObject(player.position.x, player.position.y, 5, 5, 'rgb(50, 10, 40)');
+
+	var mouseCoords = new Vector2D(event.clientX, -event.clientY);
+	var differenceVector = mouseCoords.subtract(player.position);
+	differenceVector = differenceVector.normalize();
+	differenceVector = differenceVector.scale(40);
+	bullet.velocity = differenceVector;
+
+	// event.clientX
+	// -event.clientY;
+});
 
 window.addEventListener('keydown', function(event) {
 	if(event.keyCode == 87) {
@@ -153,6 +227,10 @@ function update() {
 		var gameObject = gameObjects[objectIndex];
 
 		gameObject.position = gameObject.position.add(gameObject.velocity);
+
+		if(gameObject.tags.indexOf('enemy') != -1) {
+			gameObject.think();
+		}
 
 		var hittingStatic = false;
 
