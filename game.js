@@ -15,6 +15,8 @@ var yDirection = 0;
 var mousingDown = false;
 var mouseCoords = new Vector2D();
 
+var enemiesStanding = 0;
+
 var playerSpeed = 4;
 var playerShootRestrainer = 0;
 var playerFireRate = 2;
@@ -23,7 +25,9 @@ var lastUpdate = new Date();
 
 var gameObjects = [];
 
-var equippedWeapon = new Weapon();
+var equippedWeapon = new Weapon(0, 0);
+equippedWeapon.image = 'Images/basicweapon.png';
+equippedWeapon.relative = player;
 
 function Vector2D(x, y) {
 	var me = this;
@@ -55,6 +59,7 @@ function Vector2D(x, y) {
 function GameObject(x, y, w, h, color) {
 	var me = this;
 
+	this.lifetime = 0;
 	this.position = new Vector2D(x, y);
 	this.w = w;
 	this.h = h;
@@ -72,6 +77,7 @@ function GameObject(x, y, w, h, color) {
 	this.frameDuration = 100;
 	this.frameTimer = 0;
 	this.animationSpeed = 0;
+	this.behaviors = [];
 
 	me.remove = function() {
 		gameObjects.splice(gameObjects.indexOf(me), 1);
@@ -87,7 +93,7 @@ function Character(x, y, w, h) {
 
 	me.healthBar = new GameObject(0, 20, w, 10);
 	me.healthBar.color = 'rgb(200, 0, 0)';
-	me.healthBar.relative = this;
+	me.healthBar.relative = me;
 	me.healthBar.kinematic = true;
 	me.health = 100;
 	me.maxHealth = 100;
@@ -98,6 +104,14 @@ function Character(x, y, w, h) {
 
 		if (me.health <= 0) {
 			me.remove();
+
+			if(me.tags.indexOf('enemy') != -1) {
+				enemiesStanding -= 1;
+
+				if(enemiesStanding <= 0) {
+					var  boss = new Enemy(400, 400, 'rangedBoss' );
+				}
+			}
 		}
 	}
 }
@@ -106,6 +120,8 @@ function Weapon(x, y, type) {
 	GameObject.call(this, x, y, 50, 50);
 
 	var me = this;
+
+	me.kinematic = true;
 
 	me.fireRate = 1;
 	me.damage = 2;
@@ -120,6 +136,7 @@ function Weapon(x, y, type) {
 	me.tags.push('weapon');
 }
 
+
 function Enemy(x, y, type) {
 	Character.call(this, x, y, 50, 50);
 
@@ -133,6 +150,13 @@ function Enemy(x, y, type) {
 
 	me.tags.push('enemy');
 	me.tags.push(type);
+
+	enemiesStanding += 1;
+
+	if(type == 'rangedBoss') {
+		me.maxHealth = 2000;
+		me.health = 2000;
+	}
 
 	me.think = function() {
 		// look for player?
@@ -179,6 +203,34 @@ function Enemy(x, y, type) {
 					me.lastShootTime = currentTime;
 				}
 			} break;
+
+			case 'rangedBoss': {
+				var currentTime = new Date();
+				if(currentTime - me.lastShootTime > 1000 / me.fireRate) {
+					var normalizedVector = differenceVector.normalize();
+					var scaledVector = normalizedVector.scale(10);
+					var projectile = new GameObject(me.position.x, me.position.y, 15, 10);
+					projectile.tags.push('bossMissile');
+					projectile.kinematic = true;
+					projectile.behaviors.push(function() {
+						if(projectile.lifetime < 2) {
+							var differenceVector = player.position.subtract(projectile.position);
+							differenceVector = differenceVector.normalize();
+							differenceVector = differenceVector.scale(10);
+							// projectile.velocity = projectile.velocity.add(differenceVector);
+							projectile.velocity = differenceVector;
+						}
+					});
+					projectile.color = 'rgb(255, 0, 0)';
+					scaledVector.y += distance / 100;
+
+					// scaledVector = scaledVector.add(player.velocity.scale(10));
+
+
+					projectile.velocity = scaledVector;
+					me.lastShootTime = currentTime;
+				}
+			} break;
 		}
 	}
 }
@@ -207,8 +259,10 @@ player.frameCount = 2;
 player.image = "Images/stickFigure.png";
 
 var equipment = new Weapon(200, 0, 'DMR')
-
+// equipment.image = 'Images/basicweapon.png';
 // var enemy = new Enemy(300, -20, 'melee');
+
+var  boss = new Enemy(500, 400, 'rangedBoss' );
 
 var ground = new GameObject(0, -500, 10000, 10, 'rgb(0, 0, 0)');
 ground.static = true;
@@ -240,6 +294,10 @@ function generateLevel(difficulty) {
 		
 		obstacleCount--;
 	}
+
+}
+
+function somefunction() {
 
 }
 
@@ -336,6 +394,8 @@ function localToWorld(x, y) {
 function update() {
 	tools.clearRect(0, 0, windowWidth, windowHeight);
 
+	// console.log(equippedWeapon.position);
+
 	var currentTime = new Date();
 	var deltaTime = currentTime - lastUpdate;
 
@@ -360,7 +420,14 @@ function update() {
 	for(var objectIndex = 0; objectIndex < gameObjects.length; objectIndex++) {
 		var gameObject = gameObjects[objectIndex];
 
+		gameObject.lifetime += deltaTime / 1000;
+
 		gameObject.position = gameObject.position.add(gameObject.velocity);
+
+		for (var behaviorIndex = 0; behaviorIndex < gameObject.behaviors.length; behaviorIndex++) {
+			var behavior = gameObject.behaviors[behaviorIndex];
+			behavior();
+		}
 
 		var friction = 0.5;
 
@@ -429,7 +496,8 @@ function update() {
 
 					if(colliderObject.tags.indexOf('weapon') != -1) {
 						equippedWeapon = colliderObject;
-						colliderObject.remove();
+						// colliderObject.remove();
+						colliderObject.relative = player;
 					}
 				}
 
@@ -470,6 +538,11 @@ function update() {
 		if(gameObject.animationSpeed > 0 && gameObject.grounded && gameObject.frameTimer > gameObject.frameDuration) {
 			gameObject.currentFrame = (gameObject.currentFrame + 1) % (gameObject.frameCount);
 			gameObject.frameTimer = 0;
+		}
+
+		if(gameObject == equippedWeapon) {
+			// console.log([drawX, drawY]);
+			console.log(gameObject.image);
 		}
 
 		if(gameObject.image) {
