@@ -1,4 +1,8 @@
 // todo
+	// healthkit
+	// different suits
+	// coins/currency
+		// what do you spend it on?
 	// animated sprites
 	// generate loot on enemy defeat
 
@@ -10,6 +14,8 @@ gameScreen.width = windowWidth;
 gameScreen.height = windowHeight;
 var tools = gameScreen.getContext('2d');
 
+var defaultProjectileLifetime = 10;
+
 var xDirection = 0;
 var yDirection = 0;
 var mousingDown = false;
@@ -17,18 +23,25 @@ var mouseCoords = new Vector2D();
 
 var enemiesStanding = 0;
 
+var currency = 20;
+
 var playerSpeed = 4;
 var playerShootRestrainer = 0;
 var playerFireRate = 2;
+var playerInvincible = false;
+
+var interactiveEnvironment = null;
 
 var lastUpdate = new Date();
 
 var gameObjects = [];
 
-var equippedWeapon = new Weapon(0, 0);
+var equippedWeapon = new Weapon(20, 0);
 equippedWeapon.image = 'Images/basicweapon.png';
 equippedWeapon.relative = player;
 
+var speedPowerup = new PowerUp(100, 200, 'speed');
+var invincePowerup = new PowerUp(100, 100, 'invincible')
 function Vector2D(x, y) {
 	var me = this;
 	me.x = x;
@@ -59,6 +72,7 @@ function Vector2D(x, y) {
 function GameObject(x, y, w, h, color) {
 	var me = this;
 
+	this.timeAlive = 0;
 	this.lifetime = 0;
 	this.position = new Vector2D(x, y);
 	this.w = w;
@@ -68,16 +82,21 @@ function GameObject(x, y, w, h, color) {
 	this.image = null;
 	this.static = false;
 	this.kinematic = false;
+	this.fixed = false;
 	this.grounded = false;
 	this.relative = null;
 	this.tags = [];
 	this.currentFrame = 0;
 	this.frameCount = 0;
+	this.frameRow = 0;
 	this.frameWidth = 0;
+	this.frameHeight = 0;
 	this.frameDuration = 100;
 	this.frameTimer = 0;
 	this.animationSpeed = 0;
+	this.text = null;
 	this.behaviors = [];
+	this.clickBehaviors = [];
 
 	me.remove = function() {
 		gameObjects.splice(gameObjects.indexOf(me), 1);
@@ -98,7 +117,34 @@ function Character(x, y, w, h) {
 	me.health = 100;
 	me.maxHealth = 100;
 
+	me.armor = 0;
+	me.armorBar = new GameObject(0, 20, 0, 10);
+	me.armorBar.color = 'lightblue';
+	me.armorBar.relative = me;
+	me.armorBar.kinematic = true;
+
+
 	me.changeHealth = function(amount) {
+		if(me == player && playerInvincible == true) {
+			return;
+		}
+
+		if(me.armor > 0 && amount < 0) {
+			me.armor += amount;
+
+			if(me.armor < 0) {
+				me.health += me.armor;
+				me.armor = 0;
+			}
+
+			amount = 0;
+			me.armorBar.w = me.armor / 100 * me.w;
+		}
+
+		if(me == player && me.armor <= 0) {
+			player.frameRow = 0;
+		}
+
 		me.health += amount;
 		me.healthBar.w = me.health / me.maxHealth * me.w;
 
@@ -108,22 +154,47 @@ function Character(x, y, w, h) {
 			if(me.tags.indexOf('enemy') != -1) {
 				enemiesStanding -= 1;
 
+				var coin = new GameObject(me.position.x, me.position.y, 10, 10, 'yellow');
+				coin.tags.push('coin');
+
 				if(enemiesStanding <= 0) {
-					var  boss = new Enemy(400, 400, 'rangedBoss' );
+					var boss = new Enemy(player.position.x + 400, 400, 'rangedBoss');
 				}
 			}
 		}
 	}
+
+	me.addArmor = function(amount) {
+		me.armor += amount;
+		me.armorBar.w = me.armor / 100 * me.w;
+		if(me == player) {
+			player.frameRow = 1;
+		}
+	}
+}
+
+function PowerUp(x, y, type) {
+	GameObject.call(this, x, y, 25, 25);
+
+	var me = this;
+
+	if(type == 'speed') {
+		me.image = 'Images/speeder.png';
+		me.tags.push('speeder');
+	} else if(type == 'invincible'){
+		me.image = 'Images/Invincible.png';
+		me.tags.push('invincible');
+	}
 }
 
 function Weapon(x, y, type) {
-	GameObject.call(this, x, y, 50, 50);
+	GameObject.call(this, x, y, 25, 25);
 
 	var me = this;
 
 	me.kinematic = true;
 
-	me.fireRate = 1;
+	me.fireRate = 5;
 	me.damage = 2;
 	me.gravity = 1;
 
@@ -187,6 +258,7 @@ function Enemy(x, y, type) {
 					var normalizedVector = differenceVector.normalize();
 					var scaledVector = normalizedVector.scale(10);
 					var projectile = new GameObject(me.position.x, me.position.y, 15, 10);
+					projectile.lifetime = defaultProjectileLifetime;
 					if(type == 'miner') {
 						projectile.color = 'orange';
 						projectile.tags.push('enemyMine');
@@ -210,10 +282,11 @@ function Enemy(x, y, type) {
 					var normalizedVector = differenceVector.normalize();
 					var scaledVector = normalizedVector.scale(10);
 					var projectile = new GameObject(me.position.x, me.position.y, 15, 10);
+					projectile.lifetime = defaultProjectileLifetime;
 					projectile.tags.push('bossMissile');
 					projectile.kinematic = true;
 					projectile.behaviors.push(function() {
-						if(projectile.lifetime < 2) {
+						if(projectile.timeAlive < 2) {
 							var differenceVector = player.position.subtract(projectile.position);
 							differenceVector = differenceVector.normalize();
 							differenceVector = differenceVector.scale(10);
@@ -255,6 +328,7 @@ function checkCollision(gameObjectA, gameObjectB) {
 
 var player = new Character(0, 0, 20, 20);
 player.frameWidth = 67;
+player.frameHeight = 108;
 player.frameCount = 2;
 player.image = "Images/stickFigure.png";
 
@@ -262,10 +336,13 @@ var equipment = new Weapon(200, 0, 'DMR')
 // equipment.image = 'Images/basicweapon.png';
 // var enemy = new Enemy(300, -20, 'melee');
 
-var  boss = new Enemy(500, 400, 'rangedBoss' );
+// var boss = new Enemy(500, 400, 'rangedBoss');
 
 var ground = new GameObject(0, -500, 10000, 10, 'rgb(0, 0, 0)');
 ground.static = true;
+
+var shop = new GameObject(Math.random() * 7345, 25, 132, 96);
+shop.image = "Images/shopTruck.png";
 
 generateLevel();
 
@@ -297,12 +374,38 @@ function generateLevel(difficulty) {
 
 }
 
-function somefunction() {
-
-}
-
 window.addEventListener('mousedown', function(event) {
 	mousingDown = true;
+
+	var worldCoords = localToWorld(event.clientX, -event.clientY);
+	var mouseObject = new GameObject(worldCoords.x, worldCoords.y, 1, 1);
+	var fixedMouseObject = new GameObject(event.clientX, -event.clientY, 1, 1);
+
+	for (var objectIndex = 0; objectIndex < gameObjects.length; objectIndex++) {
+		var gameObject = gameObjects[objectIndex];
+
+		if(gameObject.fixed) {
+			if(checkCollision(fixedMouseObject, gameObject)) {
+				if(gameObject.clickBehaviors.length) {
+					for (var behaviorIndex = 0; behaviorIndex < gameObject.clickBehaviors.length; behaviorIndex++) {
+						var behavior = gameObject.clickBehaviors[behaviorIndex];
+						behavior();
+						//If behaviorIndex is < 0 then search it for the specific behavior 
+					}
+				}
+			}
+		}
+
+		if(checkCollision(mouseObject, gameObject)) {
+			if(gameObject.clickBehaviors.length) {
+				for (var behaviorIndex = 0; behaviorIndex < gameObject.clickBehaviors.length; behaviorIndex++) {
+					var behavior = gameObject.clickBehaviors[behaviorIndex];
+					behavior();
+					//If behaviorIndex is < 0 then search it for the specific behavior 
+				}
+			}
+		}
+	}
 });
 
 window.addEventListener('mouseup', function(event) {
@@ -338,6 +441,29 @@ window.addEventListener('keydown', function(event) {
 		//d
 		xDirection = 1;
 		player.animationSpeed = 1;
+	}
+
+	if(event.keyCode == 69) {
+		//e
+		if(interactiveEnvironment != null){
+			if(interactiveEnvironment == shop) {
+				// open the shop
+				var armorButton = new GameObject(10, -50, 150, 50);
+				armorButton.image = 'Images/Armor_Icon.png';
+				armorButton.text = 'armor';
+				armorButton.kinematic = true;
+				armorButton.fixed = true;
+				armorButton.clickBehaviors.push(function() {
+					// buy armor
+					if(currency >= 20) {
+						currency -= 20;
+						player.addArmor(100);
+					}
+
+				});
+			}
+		}
+
 	}
 });
 
@@ -394,8 +520,6 @@ function localToWorld(x, y) {
 function update() {
 	tools.clearRect(0, 0, windowWidth, windowHeight);
 
-	// console.log(equippedWeapon.position);
-
 	var currentTime = new Date();
 	var deltaTime = currentTime - lastUpdate;
 
@@ -406,6 +530,7 @@ function update() {
 
 	if(mousingDown == true && playerShootRestrainer > 1000 / equippedWeapon.fireRate) {
 		var bullet = new GameObject(player.position.x, player.position.y, 5, 5, 'rgb(50, 10, 40)');
+		bullet.lifetime = 0.15; //defaultProjectileLifetime;
 		bullet.tags.push('bullet');
 
 		var localCoords = localToWorld(mouseCoords.x, mouseCoords.y);
@@ -420,7 +545,12 @@ function update() {
 	for(var objectIndex = 0; objectIndex < gameObjects.length; objectIndex++) {
 		var gameObject = gameObjects[objectIndex];
 
-		gameObject.lifetime += deltaTime / 1000;
+		gameObject.timeAlive += deltaTime / 1000;
+		if(gameObject.lifetime > 0 && gameObject.timeAlive > gameObject.lifetime) {
+			gameObject.remove();
+			objectIndex--;
+			continue;
+		}
 
 		gameObject.position = gameObject.position.add(gameObject.velocity);
 
@@ -471,8 +601,18 @@ function update() {
 				}
 
 				if(gameObject == player) {
+					if(colliderObject == shop) {
+						interactiveEnvironment = shop;
+					}
+
 					if(colliderObject.tags.indexOf('spike') != -1) {
 						player.changeHealth(-1);
+					}
+
+					if(colliderObject.tags.indexOf('coin') != -1) {
+						// player.changeCoin(1);
+						currency += 1;
+						colliderObject.remove();
 					}
 
 					if(colliderObject.tags.indexOf('melee') != -1) {
@@ -481,6 +621,24 @@ function update() {
 						differenceVector = differenceVector.normalize();
 						differenceVector = differenceVector.scale(10);
 						player.velocity = differenceVector;
+					}
+
+					if(colliderObject.tags.indexOf('speeder') != -1) {
+						playerSpeed += 10;
+						colliderObject.remove();
+
+						setTimeout(function() {
+							playerSpeed -= 10;
+						}, 20000);
+					}
+
+					if(colliderObject.tags.indexOf('invincible') != -1) {
+						playerInvincible = true;
+						colliderObject.remove();
+
+						setTimeout(function() {
+							playerInvincible = false;
+						}, 15000);
 					}
 
 					if(colliderObject.tags.indexOf('enemyBullet') != -1) {
@@ -519,17 +677,28 @@ function update() {
 
 		var offsetX = gameScreen.width / 2;
 		var offsetY = gameScreen.height / 2;
-		if(gameObject != player) {
-			drawX = (gameObject.position.x - player.position.x) + offsetX;
-			drawY = (gameObject.position.y - player.position.y) - offsetY;
 
-			if(gameObject.relative != null) {
-				drawX += gameObject.relative.position.x;
-				drawY += gameObject.relative.position.y;
-			}
+		if(gameObject.fixed == true) {
+			drawX = gameObject.position.x;
+			drawY = gameObject.position.y;
 		} else {
-			drawX = offsetX;
-			drawY = -offsetY;
+			if(gameObject != player) {
+				drawX = (gameObject.position.x - player.position.x) + offsetX;
+				drawY = (gameObject.position.y - player.position.y) - offsetY;
+
+				if(gameObject.relative != null) {
+					// if(gameObject.relative == player) {
+					// 	drawX = player.position.x + gameObject.position.x;
+					// 	drawY = player.position.y + gameObject.position.y;
+					// } else {
+						drawX += gameObject.relative.position.x;
+						drawY += gameObject.relative.position.y;
+					// }
+				}
+			} else {
+				drawX = offsetX;
+				drawY = -offsetY;
+			}
 		}
 
 		tools.fillStyle = gameObject.color;
@@ -540,26 +709,35 @@ function update() {
 			gameObject.frameTimer = 0;
 		}
 
-		if(gameObject == equippedWeapon) {
-			// console.log([drawX, drawY]);
-			console.log(gameObject.image);
-		}
-
 		if(gameObject.image) {
 			var image = new Image();
 			image.src = gameObject.image;
-			tools.drawImage(
-				image,
-				gameObject.currentFrame * gameObject.frameWidth, 0,
-				gameObject.frameWidth, 108,
-				drawX, -drawY,
-				gameObject.w, gameObject.h
-			);
+
+			if(gameObject.frameWidth != 0) {
+				tools.drawImage(
+					image,
+					gameObject.currentFrame * gameObject.frameWidth,
+					gameObject.frameRow * gameObject.frameHeight,
+					gameObject.frameWidth,
+					gameObject.frameHeight,
+					drawX, -drawY,
+					gameObject.w, gameObject.h
+				);
+			} else {
+				tools.drawImage(
+					image,
+					drawX, -drawY,
+					gameObject.w, gameObject.h
+				);
+			}
 		} else {
 			tools.fillRect(drawX, -drawY, gameObject.w, gameObject.h);
 		}
 
 	}
+
+	tools.font = '36px monospace';
+	tools.fillText(currency + ' coins', 50, 50);
 
 	lastUpdate = currentTime;
 
